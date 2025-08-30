@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import functools
-import logging
-import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Optional, ParamSpec, Protocol, TypeVar, cast
+import functools
+import logging
+import os
+from typing import Any, ParamSpec, Protocol, TypeVar, cast
 
 from activops.utils.config import LOG_FILE_PATH, LOG_ROTATION_DAYS
 from activops.utils.log_rotation import rotate_logs
@@ -66,9 +66,9 @@ class LoggerProtocol(Protocol):
 
 
 @dataclass(frozen=True)
-class MixonautLogger:
+class ActivopsLogger:
     """
-    A logger class for Mixonaut projects.
+    A logger class for Activops projects.
 
     This logger is designed to provide a structured and organized way of logging messages at different levels.
     It uses the Python `logging` module to handle log messages, and provides methods for debugging,
@@ -152,20 +152,16 @@ class MixonautLogger:
         - suffix (str): The suffix to append to the original logger name.
 
         Returns:
-        A new MixonautLogger instance that is a child of this logger.
+        A new ActivopsLogger instance that is a child of this logger.
         """
-        return MixonautLogger(self._base.getChild(suffix))
+        return ActivopsLogger(self._base.getChild(suffix))
 
 
-def _ensure_handlers(
-    base: logging.Logger, global_log_file: str, script_log_file: str
-) -> None:
-    if getattr(base, "_mixonaut_configured", False):
+def _ensure_handlers(base: logging.Logger, global_log_file: str, script_log_file: str) -> None:
+    if getattr(base, "_activops_configured", False):
         return
 
-    formatter = logging.Formatter(
-        "%(asctime)s - %(levelname)s - [%(name)s] %(message)s"
-    )
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s - [%(name)s] %(message)s")
 
     stream = logging.StreamHandler()
     stream.setFormatter(formatter)
@@ -179,7 +175,7 @@ def _ensure_handlers(
     fh_script.setFormatter(formatter)
     base.addHandler(fh_script)
 
-    setattr(base, "_mixonaut_configured", True)
+    setattr(base, "_activops_configured", True)
 
 
 def get_logger(script_name: str) -> LoggerProtocol:
@@ -194,21 +190,21 @@ def get_logger(script_name: str) -> LoggerProtocol:
     """
     os.makedirs(LOG_FILE_PATH, exist_ok=True)
     date_str = datetime.now().strftime("%Y-%m-%d")
-    global_log_file = os.path.join(LOG_FILE_PATH, f"{date_str}_Mixonaut.log")
+    global_log_file = os.path.join(LOG_FILE_PATH, f"{date_str}_Activops.log")
     script_log_file = os.path.join(LOG_FILE_PATH, f"{date_str}_{script_name}.log")
 
     try:
         rotate_logs(LOG_FILE_PATH, LOG_ROTATION_DAYS, logf=script_log_file)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         base_fallback = logging.getLogger(script_name)
         base_fallback.setLevel(logging.DEBUG)
         _ensure_handlers(base_fallback, global_log_file, script_log_file)
-        MixonautLogger(base_fallback).warning(f"Rotation des logs échouée: {exc}")
+        ActivopsLogger(base_fallback).warning(f"Rotation des logs échouée: {exc}")
 
     base = logging.getLogger(script_name)
     base.setLevel(logging.INFO)
     _ensure_handlers(base, global_log_file, script_log_file)
-    return MixonautLogger(base)  # ← classe concrète, pas le Protocol
+    return ActivopsLogger(base)  # ← classe concrète, pas le Protocol
 
 
 # ---------- Utilities ----------
@@ -216,7 +212,7 @@ def ensure_logger(logger: LoggerProtocol | None, module: str) -> LoggerProtocol:
     """
     Ensure that a logger is available for the given module.
 
-    If no logger is provided, return a new MixonautLogger instance.
+    If no logger is provided, return a new ActivopsLogger instance.
     Otherwise, create a child logger with the given module name.
 
     Args:
@@ -246,7 +242,7 @@ def with_child_logger(func: Callable[P, R]) -> Callable[P, R]:
 
     @functools.wraps(func)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-        current = cast(Optional[LoggerProtocol], kwargs.get("logger"))
+        current = cast(LoggerProtocol | None, kwargs.get("logger"))
         kwargs["logger"] = ensure_logger(current, func.__module__)
         return func(*args, **kwargs)
 

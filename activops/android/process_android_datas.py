@@ -1,29 +1,29 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 import os
-from datetime import timedelta
-from typing import Any, Optional
+from typing import Any
 
 from activops.db.db_connection import get_db_connection, get_dict_cursor
 from activops.utils.logger import LoggerProtocol, ensure_logger, with_child_logger
-
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
 
 @with_child_logger
-def process_android_datas(logger: Optional[LoggerProtocol] = None) -> None:
-    """Traite les données Android: agrégation -> insertion -> purge."""
+def process_android_datas(logger: LoggerProtocol | None = None) -> None:
+    """
+    Agrège android_tmp → insère dans android_usage → purge android_tmp.
+    """
     logger = ensure_logger(logger, __name__)
     conn = get_db_connection(logger=logger)
     if conn is None:
-        logger.error("❌ Impossible d'établir la connexion MySQL")
+        logger.error("❌ Connexion MySQL indisponible")
         return
 
     try:
         # ---- Phase 1: lecture + insertions ---------------------------------
-        with get_dict_cursor(conn) as cursor:  # ⬅️ CURSOR DICT
-            # 1) timestamps distincts
+        with get_dict_cursor(conn) as cursor:
             cursor.execute(
                 """
                 SELECT DISTINCT execution_timestamp AS execution_timestamp
@@ -31,17 +31,19 @@ def process_android_datas(logger: Optional[LoggerProtocol] = None) -> None:
                 ORDER BY execution_timestamp ASC;
                 """
             )
-            timestamps: list[dict[str, Any]] = cursor.fetchall()
-
-            prev_execution_timestamp: Optional[Any] = None
+            timestamps: list[dict[str, Any]] = cursor.fetchall() or []
+            prev_execution_timestamp: datetime | None = None
 
             for row in timestamps:
-                # Debug type/échantillon si besoin
-                # logger.info("Row type=%s ; sample=%s", type(row), row)
+                execution_timestamp = row["execution_timestamp"]  # typé datetime par le driver
+                if not isinstance(execution_timestamp, datetime):
+                    # fallback (selon driver/paramétrage)
+                    try:
+                        execution_timestamp = datetime.fromisoformat(str(execution_timestamp))
+                    except Exception:  # pylint: disable=broad-except
+                        logger.warning("Timestamp inattendu: %r", row["execution_timestamp"])
+                        continue
 
-                execution_timestamp = row["execution_timestamp"]
-
-                # Déterminer period_start
                 if (
                     prev_execution_timestamp is not None
                     and execution_timestamp.date() == prev_execution_timestamp.date()
@@ -49,14 +51,10 @@ def process_android_datas(logger: Optional[LoggerProtocol] = None) -> None:
                     period_start = prev_execution_timestamp
                 else:
                     period_start = execution_timestamp - timedelta(minutes=10)
-                    logger.info(
-                        "🌙 Nouveau jour détecté, period_start initialisé à %s",
-                        period_start,
-                    )
+                    logger.info("🌙 Nouveau jour, period_start=%s", period_start)
 
                 period_end = execution_timestamp
 
-                # 2) Vérifier si déjà traité
                 cursor.execute(
                     "SELECT COUNT(*) AS cnt FROM android_usage WHERE timestamp = %s;",
                     (execution_timestamp,),
@@ -65,7 +63,6 @@ def process_android_datas(logger: Optional[LoggerProtocol] = None) -> None:
                 already_done = int(result["cnt"]) > 0
 
                 if not already_done:
-                    # 3) Récupérer les entrées actives
                     cursor.execute(
                         """
                         SELECT
@@ -80,10 +77,9 @@ def process_android_datas(logger: Optional[LoggerProtocol] = None) -> None:
                         """,
                         (execution_timestamp, period_start, period_end),
                     )
-                    active_entries: list[dict[str, Any]] = cursor.fetchall()
+                    active_entries: list[dict[str, Any]] = cursor.fetchall() or []
 
                     if active_entries:
-                        # Astuce perf: executemany (optionnel)
                         cursor.executemany(
                             """
                             INSERT INTO android_usage
@@ -104,25 +100,22 @@ def process_android_datas(logger: Optional[LoggerProtocol] = None) -> None:
                         conn.commit()
                         logger.info("✅ Données insérées pour %s", execution_timestamp)
                     else:
-                        logger.info(
-                            "🔍 Aucune donnée active à insérer pour %s",
-                            execution_timestamp,
-                        )
+                        logger.info("🔍 Aucune donnée active pour %s", execution_timestamp)
                 else:
-                    logger.info("ℹ️ %s déjà traité, pas d'insertion.", execution_timestamp)
+                    logger.info("📆 %s déjà traité, pas d'insertion.", execution_timestamp)
 
                 prev_execution_timestamp = execution_timestamp
 
     except Exception as exc:  # pylint: disable=broad-except
-        logger.exception("❌ Erreur MySQL lors du traitement des données : %s", exc)
+        logger.exception("❌ Erreur MySQL lors du traitement : %s", exc)
         try:
             conn.rollback()
-        except Exception:  # pylint: disable=broad-except
+        except Exception:
             logger.exception("Rollback a échoué")
 
     # ---- Phase 2: purge -----------------------------------------------------
     try:
-        with get_dict_cursor(conn) as cursor:  # ⬅️ CURSOR DICT ICI AUSSI
+        with get_dict_cursor(conn) as cursor:
             cursor.execute("SELECT MAX(timestamp) AS last_timestamp FROM android_usage;")
             result = cursor.fetchone() or {"last_timestamp": None}
             last_timestamp = result["last_timestamp"]
@@ -136,17 +129,14 @@ def process_android_datas(logger: Optional[LoggerProtocol] = None) -> None:
                     (last_timestamp,),
                 )
                 conn.commit()
-                logger.info(
-                    "🗑️ Suppression des entrées de android_tmp antérieures à %s.",
-                    last_timestamp - timedelta(hours=12),
-                )
+                logger.info("🗑️ Purge android_tmp avant %s.", last_timestamp - timedelta(hours=12))
             else:
-                logger.info("ℹ️ Aucune donnée dans android_usage, pas de purge de android_tmp.")
+                logger.info("📆 Aucune donnée dans android_usage, pas de purge.")
     except Exception as exc:  # pylint: disable=broad-except
-        logger.exception("❌ Erreur lors du nettoyage de android_tmp : %s", exc)
+        logger.exception("❌ Erreur purge android_tmp : %s", exc)
         try:
             conn.rollback()
-        except Exception:  # pylint: disable=broad-except
+        except Exception:
             logger.exception("Rollback a échoué")
     finally:
         try:

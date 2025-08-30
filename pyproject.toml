@@ -6,53 +6,92 @@ build-backend = "setuptools.build_meta"
 name = "activops"
 version = "0.1.0"
 description = "act"
-requires-python = ">=3.9"
+requires-python = ">=3.11"  # cohérent avec mypy/ruff
 
 [tool.setuptools]
-packages = ["activops"]
+# plus robuste que lister les packages à la main
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["activops*"]
+exclude = ["tests*", "z_old*", "docker*"]
 
-[tool.pylint.'MASTER']
+# --- Pylint (si tu le gardes ponctuellement, pas en pre-commit) -------------
+[tool.pylint.MASTER]
 ignore = ["z_old", "docker"]
 
-[tool.isort]
-profile = "black"
-line_length = 120         # aligne-toi avec Black (par défaut 88)
-src_paths = ["activops"] # ton package
-known_first_party = ["activops"]
-
+# --- Mypy -------------------------------------------------------------------
 [tool.mypy]
 python_version = "3.11"
-python_executable = "/home/pipo/envs/bo_activity/bin/python"
 pretty = true
 show_error_codes = true
 ignore_missing_imports = false
 warn_unused_ignores = true
 warn_redundant_casts = true
 no_implicit_optional = true
-
-# exclusions
-exclude = [
-  "z_old",
-  "docker",
-]
-
-# Strict de base
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 warn_return_any = true
 disallow_untyped_calls = true
 disallow_any_generics = true
 warn_unused_configs = true
-warn_no_return = true   # 👉 signale les fonctions sans return sur tous les chemins
+warn_no_return = true
+files = ["activops"]
+explicit_package_bases = true
+exclude = "^(z_old|docker)/"  # regex unique (mypy attend une regex, pas une liste)
 
 [[tool.mypy.overrides]]
 module = "sklearn.*"
 ignore_missing_imports = true
 follow_imports = "skip"
 
-# (Optionnel) si tu utilises numpy partout, ça réduit le bruit:
 [[tool.mypy.overrides]]
 module = "numpy.*"
 ignore_missing_imports = true
 follow_imports = "skip"
 
+[[tool.mypy.overrides]]
+module = "garminconnect.*"
+ignore_missing_imports = true
+follow_imports = "skip"
+
+[[tool.mypy.overrides]]
+module = "mysql.*"
+ignore_missing_imports = true
+follow_imports = "skip"
+
+[[tool.mypy.overrides]]
+module = "pytz"
+ignore_missing_imports = true
+follow_imports = "skip"
+
+[[tool.mypy.overrides]]
+module = "dotenv"
+ignore_missing_imports = true
+follow_imports = "skip"
+
+# --- Ruff (v0.6+) -----------------------------------------------------------
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = [
+  ".venv", "venv", "__pycache__", ".mypy_cache", ".pytest_cache",
+  "dist", "build", "docker", "z_old"
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C4", "RUF"]
+ignore = ["RUF003", "B010"]
+unfixable = [
+  "B010"
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["activops"]
+combine-as-imports = true
+force-sort-within-sections = true
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+skip-magic-trailing-comma = false
