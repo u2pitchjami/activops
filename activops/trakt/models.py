@@ -5,6 +5,15 @@ from typing import Any, TypedDict
 # --- Trakt raw payloads (subset utile) ---------------------------------------
 
 
+class TraktTokens(TypedDict):
+    access_token: str
+    refresh_token: str
+    scope: str
+    expires_in: int
+    token_type: str
+    created_at: int
+
+
 class Ids(TypedDict, total=False):
     trakt: int | None
     imdb: str | None

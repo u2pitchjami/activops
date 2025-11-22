@@ -54,28 +54,49 @@ class TraktClient:
             logger.warning("Impossible de mettre à jour .env: %s", exc)
 
     def refresh_access_token(self) -> None:
+        """
+        Rafraîchit le token Trakt avec gestion d'erreurs et logs propres.
+        """
         logger.info("🔄 Rafraîchissement du token…")
-        data = {
+
+        payload = {
             "refresh_token": self._refresh_token,
             "client_id": API_KEY,
             "client_secret": API_SECRET,
             "redirect_uri": REDIRECT_URI,
             "grant_type": "refresh_token",
         }
-        r = requests.post(f"{API_URL}/oauth/token", json=data, timeout=15)
-        r.raise_for_status()
-        tokens: dict[str, str] = r.json()
+
+        try:
+            response = requests.post(f"{API_URL}/oauth/token", json=payload, timeout=15)
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            status = exc.response.status_code
+            if status in (400, 401):
+                logger.error(
+                    "❌ Impossible de rafraîchir le token (code %s). "
+                    "Ton refresh_token est probablement expiré ou invalide.",
+                    status,
+                )
+                logger.error("➡️ Solution : Regénère un token OAuth complet.")
+            else:
+                logger.error("Erreur HTTP lors du refresh: %s", exc)
+            raise
+
+        except requests.RequestException as exc:
+            logger.error("Erreur réseau lors du refresh: %s", exc)
+            raise
+
+        tokens = response.json()
         self._access_token = tokens["access_token"]
         self._refresh_token = tokens["refresh_token"]
 
-        # met aussi à jour l'environnement process (si d'autres modules s'en servent)
         os.environ["ACCESS_TOKEN"] = self._access_token
         os.environ["REFRESH_TOKEN"] = self._refresh_token
-
-        # et .env local si présent
         self._update_env("ACCESS_TOKEN", self._access_token)
         self._update_env("REFRESH_TOKEN", self._refresh_token)
-        logger.info("✅ Token rafraîchi")
+
+        logger.info("✅ Token rafraîchi avec succès !")
 
     def trakt_get(self, endpoint: str) -> JsonObj | list[JsonObj]:
         headers = {"Authorization": f"Bearer {self._access_token}"}
