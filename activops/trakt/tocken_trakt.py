@@ -53,7 +53,7 @@ def update_env_var(key: str, value: str) -> None:
     """
     from pathlib import Path
 
-    dotenv_path = Path(__file__).resolve().parent / ".env"
+    dotenv_path = Path(__file__).resolve().parent.parent / ".env"
 
     try:
         if dotenv_path.exists():
