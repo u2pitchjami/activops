@@ -1,0 +1,8 @@
+-r requirements.in
+
+mypy
+ruff
+pytest
+pre-commit
+vulture
+pip-audit

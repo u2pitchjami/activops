@@ -44,3 +44,4 @@ config.env
 *.cfg
 z_old/
 extract_2_centraldb/
+.venv/
